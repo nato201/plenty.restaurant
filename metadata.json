@@ -1,0 +1,6 @@
+{
+  "name": "Plenty Restaurant",
+  "description": "Plenty Restaurant ordering platform with ETB payments, pickup scheduling, capacity management, live audio alerts, and role-based administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

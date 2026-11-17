@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+
+  /* Plenty brand: deep navy, warm orange, cream */
+  --color-ink: #152039;        /* navy — main background & dark text */
+  --color-ink-2: #1e2c4a;      /* lifted navy surface */
+  --color-paper: #fdf3ea;      /* cream */
+  --color-paper-2: #f7e7d8;
+  --color-card: #fffaf5;
+  --color-muted: #77809a;
+  --color-line: #ecdccc;
+  --color-accent: #e8663f;     /* Plenty orange */
+  --color-accent-dark: #d1552f;
+  --color-olive: #4f8a5b;
+  --color-sage: #8fc79c;       /* fasting/veg tags on navy */
+  --color-saffron: #f2b84b;
+
+  --animate-fade: fade 220ms ease-out both;
+  --animate-rise: rise 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-slide-in: slide-in 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  .font-display,
+  .font-serif {
+    font-variation-settings: "SOFT" 50, "WONK" 0;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: #fff;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Subtle paper grain, no images required */
+  .grain {
+    background-image: radial-gradient(rgba(31, 26, 21, 0.045) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

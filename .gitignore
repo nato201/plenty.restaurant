@@ -1,0 +1,14 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Local data: customer orders (legacy JSON) and uploaded photos. Never commit.
+/data/
+
+# Scratch/test files
+*.tmp.ts

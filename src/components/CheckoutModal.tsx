@@ -573,7 +573,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   value={specialInstructions}
                   onChange={(e) => setSpecialInstructions(e.target.value)}
                   placeholder={serviceType === 'dine_in' ? 'e.g. Fasting preparation, table for 2...' : 'e.g. Fasting preparation, leave at reception desk...'}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full text-xs p-2.5 bg-ink text-white caret-accent placeholder:text-white/50 border border-ink-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
             </div>

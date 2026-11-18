@@ -364,7 +364,7 @@ export const MenuSection: React.FC<MenuSectionProps> = ({ menuItems, onAddToCart
                   value={specialNotes}
                   onChange={(e) => setSpecialNotes(e.target.value)}
                   placeholder="No onions, dressing on the side…"
-                  className="w-full px-4 py-3 bg-paper border border-line rounded-xl text-[15px] placeholder:text-muted/70 outline-none focus:border-ink transition-colors resize-none"
+                  className="w-full px-4 py-3 bg-ink text-white caret-accent border border-ink-2 rounded-xl text-[15px] placeholder:text-white/50 outline-none focus:ring-2 focus:ring-accent transition-colors resize-none"
                 />
               </div>
             </div>

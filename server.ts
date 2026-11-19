@@ -1282,7 +1282,10 @@ app.get(
       return res.status(400).json({ success: false, error: 'Missing transaction reference (tx_ref).' });
     }
     const result = await finalizePayment(txRef);
-    if (!result.ok) return res.status(result.status).json({ success: false, error: result.error });
+    // retryable = Chapa hasn't finished yet (e.g. telebirr still confirming), so the site keeps checking
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error, retryable: !!result.retryable });
+    }
     res.json({ success: true, order: result.order, payment: result.payment });
   })
 );

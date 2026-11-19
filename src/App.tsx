@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header.tsx';
 import { Hero } from './components/Hero.tsx';
 import { MenuSection } from './components/MenuSection.tsx';
@@ -25,6 +25,56 @@ function loadSavedCart(): CartItem[] {
     return Array.isArray(saved) ? saved : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * The payment we sent the customer to Chapa for. Remembered (in localStorage, so every tab sees
+ * it) until Chapa gives a final answer, so the bag empties however the customer comes back:
+ * Chapa's return link, the browser's Back button, or reopening the site after paying in the
+ * telebirr app.
+ */
+const PENDING_KEY = 'plenty_pending_payment';
+const PENDING_MAX_AGE = 6 * 60 * 60 * 1000;
+type PendingPayment = { txRef: string; startedAt: number };
+
+function readPending(): PendingPayment | null {
+  try {
+    const p = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+    if (p?.txRef && Date.now() - p.startedAt < PENDING_MAX_AGE) return p;
+    localStorage.removeItem(PENDING_KEY);
+  } catch {}
+  return null;
+}
+function writePending(txRef: string) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify({ txRef, startedAt: Date.now() }));
+  } catch {}
+}
+function clearPending(txRef?: string) {
+  try {
+    if (!txRef || readPending()?.txRef === txRef) localStorage.removeItem(PENDING_KEY);
+  } catch {}
+}
+
+type VerifyAnswer =
+  | { kind: 'paid'; order: Order }
+  | { kind: 'processing' }
+  | { kind: 'failed' }
+  /** Paid, but the pickup slot filled up during payment */
+  | { kind: 'paidButFull'; error: string };
+
+async function checkPayment(txRef: string): Promise<VerifyAnswer> {
+  try {
+    const res = await fetch(`/api/payment/verify?tx_ref=${encodeURIComponent(txRef)}`);
+    const data = await res.json().catch(() => ({}));
+    if (data.success && data.order) return { kind: 'paid', order: data.order };
+    // A network or server hiccup, or Chapa still confirming: worth asking again
+    if (data.retryable || res.status >= 500) return { kind: 'processing' };
+    if (res.status === 409) return { kind: 'paidButFull', error: data.error || '' };
+    return { kind: 'failed' };
+  } catch {
+    return { kind: 'processing' };
   }
 }
 
@@ -83,14 +133,29 @@ export default function App() {
     }
 
     if (viewParam === 'order_confirm' && txRefParam) {
-      // Back from Chapa: tidy the address bar, then confirm the payment with the server
+      // Back from Chapa through its return link: tidy the address bar, then confirm with the server
       window.history.replaceState(null, '', window.location.pathname);
-      confirmPayment(txRefParam);
+      confirmPayment(txRefParam, 'returned');
+    } else {
+      // Came back some other way (Back button, reopened the site after paying in an app)
+      const pending = readPending();
+      if (pending) confirmPayment(pending.txRef, 'background');
     }
+
+    // Coming back to this tab (e.g. after paying in the telebirr app): check again
+    const onVisible = () => {
+      const pending = readPending();
+      if (document.visibilityState === 'visible' && pending) confirmPayment(pending.txRef, 'background');
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     // Refresh menu & ordering status every 10 seconds
     const interval = setInterval(loadStoreData, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (recheckTimer.current) clearTimeout(recheckTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -99,35 +164,83 @@ export default function App() {
     } catch {}
   }, [cart]);
 
-  // Chapa can take a few seconds to mark a payment complete, so check a few times before giving up.
-  const confirmPayment = async (txRef: string) => {
-    setIsConfirmingPayment(true);
-    let lastError = '';
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 2500));
-      try {
-        const data = await fetch(`/api/payment/verify?tx_ref=${encodeURIComponent(txRef)}`).then((r) => r.json());
-        if (data.success && data.order) {
-          setIsConfirmingPayment(false);
-          setCart([]);
-          setConfirmedOrder(data.order);
-          rememberTrackedOrder({ orderNumber: data.order.orderNumber, email: data.order.customer.email });
-          loadStoreData();
-          return;
-        }
-        lastError = data.error || '';
-      } catch {
-        lastError = 'connection';
-      }
+  const confirming = useRef<string | null>(null);
+  const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onPaid = (txRef: string, order: Order) => {
+    clearPending(txRef);
+    setCart([]);
+    try {
+      sessionStorage.removeItem(CART_KEY);
+    } catch {}
+    setPaymentNotice(null);
+    setConfirmedOrder(order);
+    rememberTrackedOrder({ orderNumber: order.orderNumber, email: order.customer.email });
+    loadStoreData();
+  };
+
+  /**
+   * Find out whether the payment went through.
+   *  'returned'   - the customer just came back through Chapa's return link: show progress, and
+   *                 keep asking for up to ~45 s (telebirr / CBE Birr can take a while).
+   *  'background' - quietly check a remembered payment; if Chapa is still confirming, check
+   *                 again every 15 s while the page is open.
+   * The bag empties only once the order really exists, and stays if the payment failed.
+   */
+  const confirmPayment = async (txRef: string, mode: 'returned' | 'background') => {
+    if (confirming.current === txRef) return; // already checking this one
+    confirming.current = txRef;
+    if (recheckTimer.current) clearTimeout(recheckTimer.current);
+    if (mode === 'returned') setIsConfirmingPayment(true);
+
+    let answer: VerifyAnswer = { kind: 'processing' };
+    const attempts = mode === 'returned' ? 12 : 1;
+    for (let i = 0; i < attempts; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 4000));
+      answer = await checkPayment(txRef);
+      if (answer.kind !== 'processing') break;
     }
+    confirming.current = null;
     setIsConfirmingPayment(false);
-    setPaymentNotice({
-      title: 'We couldn’t confirm your payment',
-      body:
-        'Your order hasn’t been placed. If you completed the payment and money left your account, ' +
-        'please contact the restaurant with the time you paid; nothing is charged twice. Your bag is still saved.',
-    });
-    console.warn('Payment confirmation failed:', lastError);
+
+    if (answer.kind === 'paid') return onPaid(txRef, answer.order);
+
+    if (answer.kind === 'paidButFull') {
+      clearPending(txRef);
+      setPaymentNotice({
+        title: 'That pickup time filled up while you were paying',
+        body:
+          'Your order couldn’t be placed, and your payment will be refunded in full. ' +
+          'Your bag is still saved: please choose another time. ' +
+          'If you have questions, contact the restaurant with the time you paid.',
+      });
+      return;
+    }
+
+    if (answer.kind === 'failed') {
+      clearPending(txRef);
+      if (mode === 'returned') {
+        setPaymentNotice({
+          title: 'Your payment wasn’t completed',
+          body: 'No order was placed and nothing was charged. Your bag is still saved, so you can try again.',
+        });
+      }
+      return;
+    }
+
+    // Still processing at Chapa: keep the bag, keep checking quietly
+    if (!readPending()) writePending(txRef);
+    if (mode === 'returned') {
+      setPaymentNotice({
+        title: 'Your payment is still being confirmed',
+        body:
+          'Chapa hasn’t finished confirming it yet. Please don’t pay again: this page checks every few seconds ' +
+          'and your order appears here as soon as it’s confirmed. You’ll also get an email.',
+      });
+    }
+    recheckTimer.current = setTimeout(() => {
+      if (readPending()?.txRef === txRef) confirmPayment(txRef, 'background');
+    }, 15000);
   };
 
   // Add Item to Cart
@@ -190,10 +303,11 @@ export default function App() {
   };
 
   // Triggered when payment is initialized from checkout modal
-  const handlePaymentInitiated = (_txRef: string, checkoutUrl: string) => {
+  const handlePaymentInitiated = (txRef: string, checkoutUrl: string) => {
     setIsCheckoutOpen(false);
     // Only ever send customers to Chapa's own checkout page
     if (checkoutUrl.startsWith('https://checkout.chapa.co/')) {
+      writePending(txRef); // so we can confirm it however the customer comes back
       window.location.href = checkoutUrl;
     } else {
       setPaymentNotice({

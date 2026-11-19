@@ -104,22 +104,25 @@ Skip this to start fresh. The app then creates the starter menu and staff list o
 
 To keep your current menu edits, staff accounts and orders, do this **before step 8**.
 
-1. **On the development computer** (PowerShell):
+1. **On the development computer** (PowerShell). Use a plain SQL file: the server runs PostgreSQL 16 and can't read the compressed format made by version 18.
 
    ```powershell
-   & "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -Fc -h localhost -U plenty_app -d plenty -f plenty.dump
+   cd $env:USERPROFILE\Downloads
+   & "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" --format=plain --no-owner --no-privileges -h localhost -U plenty_app -d plenty -f plenty.sql
    ```
 
-   When it asks for a password, enter the one inside your local `DATABASE_URL`.
+   When it asks for a password, enter the one inside your local `DATABASE_URL`. Keep the file out of OneDrive, because it contains customer details.
 
-2. **Upload the file.** In the browser SSH window, click the **⋮ / gear menu → Upload file** and choose `plenty.dump`. It lands in `/home/ubuntu/`.
+2. **Upload the file.** In the browser SSH window, click the **⋮ / gear menu → Upload file** and choose `plenty.sql`. It lands in `/home/ubuntu/`.
 
 3. **On the server:**
 
    ```bash
-   sudo -u postgres pg_restore --no-owner --role=plenty_app -d plenty /home/ubuntu/plenty.dump
-   rm /home/ubuntu/plenty.dump
+   sudo -u postgres psql -d plenty -c "SET ROLE plenty_app" -f /home/ubuntu/plenty.sql
+   rm /home/ubuntu/plenty.sql
    ```
+
+   One error is expected and harmless: `unrecognized configuration parameter "transaction_timeout"`, a version 18 setting that version 16 doesn't know.
 
 4. **Dish photos you uploaded locally:** these are in `data/uploads/` on the development computer. Upload them the same way, then move them into `/opt/plenty/data/uploads/` and run `sudo chown -R plenty:plenty /opt/plenty/data`.
 

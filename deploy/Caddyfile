@@ -1,0 +1,22 @@
+# Caddy gets and renews free HTTPS certificates for both addresses automatically.
+# Both DNS records must point at this server's static IP before Caddy starts.
+#   chapa.plenty.restaurant  -> the ordering site customers use
+#   admin.plenty.restaurant  -> the staff portal (the app only shows it on the admin. address)
+
+chapa.plenty.restaurant, admin.plenty.restaurant {
+	encode zstd gzip
+
+	# Dish photos can be up to 5 MB
+	request_body {
+		max_size 6MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:3000
+}

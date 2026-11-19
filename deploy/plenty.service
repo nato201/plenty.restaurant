@@ -1,0 +1,27 @@
+[Unit]
+Description=Plenty restaurant ordering site
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=plenty
+Group=plenty
+WorkingDirectory=/opt/plenty
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/opt/plenty/node_modules/.bin/tsx server.ts
+Restart=always
+RestartSec=5
+# Give in-flight requests time to finish on restart
+TimeoutStopSec=20
+
+# Hardening: the app can only write to its data folder
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/plenty/data
+
+[Install]
+WantedBy=multi-user.target

@@ -12,3 +12,7 @@ coverage/
 
 # Scratch/test files
 *.tmp.ts
+
+# Temporary build folders made by deploy/update.sh
+dist-next/
+dist-prev/

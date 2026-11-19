@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Plenty when GitHub has new commits
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/plenty/deploy/auto-update.sh
+# A full rebuild takes a few minutes on the 2 GB plan
+TimeoutStartSec=20min

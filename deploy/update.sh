@@ -1,38 +1,92 @@
 #!/usr/bin/env bash
-# Build and (re)start Plenty. Run after setup, and every time you push new code:
+# Build and (re)start Plenty from the latest code on GitHub.
 #   sudo /opt/plenty/deploy/update.sh
-set -euo pipefail
+# It also runs automatically when GitHub has new commits (see plenty-autoupdate.timer).
+#
+# Safe by design:
+#  - the new website is built in a separate folder and swapped in only when complete,
+#    so visitors never see a half-built site;
+#  - if installing, building or the health check after restart fails, it goes back to
+#    the previous version automatically.
+set -Eeuo pipefail
 APP_DIR=/opt/plenty
 APP_USER=plenty
+HEALTH_URL=http://127.0.0.1:3000/api/health
 
 [[ $EUID -eq 0 ]] || { echo "Please run with sudo"; exit 1; }
 cd "$APP_DIR"
+as_app() { sudo -u "$APP_USER" env -u NODE_ENV "$@"; } # build tools are dev dependencies
+
+PREV=$(as_app git rev-parse HEAD)
+
+healthy() {
+  for _ in $(seq 1 40); do
+    curl -fsS "$HEALTH_URL" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+install_units() {
+  cp deploy/plenty.service deploy/plenty-autoupdate.service deploy/plenty-autoupdate.timer /etc/systemd/system/
+  cp deploy/Caddyfile /etc/caddy/Caddyfile
+  systemctl daemon-reload
+  systemctl enable --now plenty-autoupdate.timer >/dev/null 2>&1 || true
+  caddy validate --config /etc/caddy/Caddyfile >/dev/null && systemctl reload-or-restart caddy
+}
+
+INSTALLED=0
+SWAPPED=0
+# Put the previous version back: code, packages, website and service
+rollback() {
+  trap - ERR # never roll back the rollback
+  set +e
+  echo "!! Update failed. Going back to ${PREV:0:7}."
+  as_app git reset --hard -q "$PREV"
+  if [[ $INSTALLED == 1 ]]; then
+    as_app npm ci --no-audit --no-fund
+  fi
+  rm -rf dist-next
+  if [[ $SWAPPED == 1 && -d dist-prev ]]; then rm -rf dist && mv dist-prev dist; fi
+  install_units
+  systemctl restart plenty
+  if healthy; then echo "==> Back on ${PREV:0:7}; the site is running."; else echo "!! The previous version didn't start either. Check: sudo journalctl -u plenty -n 50"; fi
+  exit 1
+}
 
 echo "==> Getting the latest code"
-sudo -u "$APP_USER" git pull --ff-only
+as_app git pull --ff-only -q
+NEW=$(as_app git rev-parse HEAD)
+if [[ "$NEW" == "$PREV" ]]; then
+  echo "    Already on the latest version (${NEW:0:7}). Rebuilding anyway."
+else
+  echo "    ${PREV:0:7} -> ${NEW:0:7}: $(as_app git log -1 --format=%s)"
+fi
 
-echo "==> Installing packages and building the website"
-# Build tools (vite, tsx) are dev dependencies, so don't set NODE_ENV=production here
-sudo -u "$APP_USER" env -u NODE_ENV npm ci --no-audit --no-fund
-sudo -u "$APP_USER" env -u NODE_ENV npm run build
+trap rollback ERR
 
-echo "==> Updating service and web server config (in case they changed)"
-cp deploy/plenty.service /etc/systemd/system/plenty.service
-cp deploy/Caddyfile /etc/caddy/Caddyfile
-systemctl daemon-reload
-caddy validate --config /etc/caddy/Caddyfile >/dev/null
-systemctl reload-or-restart caddy
+if [[ "$NEW" == "$PREV" ]] || ! as_app git diff --quiet "$PREV" "$NEW" -- package.json package-lock.json || [[ ! -d node_modules ]]; then
+  echo "==> Installing packages"
+  INSTALLED=1
+  as_app npm ci --no-audit --no-fund
+else
+  echo "==> Packages unchanged, skipping install"
+fi
+
+echo "==> Building the website (in a separate folder)"
+rm -rf dist-next
+as_app npx vite build --outDir dist-next --emptyOutDir
+rm -rf dist-prev
+[[ -d dist ]] && mv dist dist-prev
+mv dist-next dist
+SWAPPED=1
+
+echo "==> Updating service and web server config"
+install_units
 
 echo "==> Restarting the app (database updates run automatically on start)"
 systemctl restart plenty
+healthy || false # a failed health check triggers the rollback
 
-for i in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
-    echo "==> Plenty is up."
-    exit 0
-  fi
-  sleep 1
-done
-echo "!! The app didn't answer within 30 seconds. See what went wrong with:"
-echo "   sudo journalctl -u plenty -n 50 --no-pager"
-exit 1
+trap - ERR
+echo "==> Plenty is up on ${NEW:0:7}."

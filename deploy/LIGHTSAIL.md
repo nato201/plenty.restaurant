@@ -167,11 +167,29 @@ Sign in at `https://admin.plenty.restaurant` and check:
 
 ---
 
+## Automatic updates
+
+Every 5 minutes the server checks GitHub. If `main` has new commits, it updates itself, so a push goes live within about 5 minutes.
+
+**What protects the live site:**
+- **Website build:** the new version is built in a separate folder, and visitors keep the current site until it's complete.
+- **Automatic rollback:** if installing, building, or starting the new version fails, the server goes back to the previous version on its own.
+- **No retry loop:** a version that failed isn't retried every 5 minutes. The next push is tried normally.
+
+**Only push working code to `main`**, because every push there goes live.
+
+| Task | Command |
+|---|---|
+| See what the auto-updater did | `sudo journalctl -u plenty-autoupdate -n 50 --no-pager` |
+| When does it check next? | `systemctl list-timers plenty-autoupdate.timer` |
+| Pause automatic updates | `sudo systemctl disable --now plenty-autoupdate.timer` |
+| Turn them back on | `sudo systemctl enable --now plenty-autoupdate.timer` |
+
 ## Everyday tasks
 
 | Task | Command (in the SSH window) |
 |---|---|
-| Deploy new code (after pushing to GitHub) | `sudo /opt/plenty/deploy/update.sh` |
+| Deploy right now, without waiting the 5 minutes | `sudo /opt/plenty/deploy/update.sh` |
 | Change a setting | `sudo nano /opt/plenty/.env` then `sudo systemctl restart plenty` |
 | Is it running? | `sudo systemctl status plenty` |
 | See the app's log | `sudo journalctl -u plenty -n 100 --no-pager` (add `-f` to follow live) |
